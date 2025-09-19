@@ -1,12 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const { createIssue } = require('../controllers/issueController');
+// Make sure all three functions are imported here
+const { createIssue, getIssues, getIssueById } = require('../controllers/issueController');
 const { protect } = require('../middleware/authMiddleware');
 
-// This route says:
-// When a POST request comes to the root URL ('/'),
-// first, run the 'protect' middleware to check if the user is logged in.
-// If they are, then proceed to the 'createIssue' controller function.
+// Route for creating a new issue
 router.post('/', protect, createIssue);
+
+// Route for getting all relevant issues for the logged-in user
+router.get('/', protect, getIssues);
+
+// Route for getting a single issue by its ID
+router.get('/:id', protect, getIssueById);
 
 module.exports = router;

@@ -16,7 +16,6 @@ const UserSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    // enum means the 'role' can only be one of these specified values
     enum: ['SuperManager', 'Manager', 'TeamLeader', 'Developer'],
     required: true
   },
@@ -25,12 +24,17 @@ const UserSchema = new mongoose.Schema({
     ref: 'Organization',
     required: true
   },
-  // This will be true only after OTP verification (or default for SuperManager)
+  // --- THIS IS THE NEW, CORRECTED FIELD ---
+  teamId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Team',
+    default: null
+  },
+  // -----------------------------------------
   isApproved: {
     type: Boolean,
     default: false
   },
-  // Fields to link users in the hierarchy
   managerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

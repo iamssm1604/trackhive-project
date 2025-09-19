@@ -5,34 +5,58 @@ const User = require('../models/User');
 // @route   POST /api/issues
 // @access  Private
 const createIssue = async (req, res) => {
-  // The frontend will send the title, description, priority, etc.
   const { title, description, priority, category } = req.body;
-
   try {
-    // We get the user's info from the 'protect' middleware
     const user = await User.findById(req.user.id);
-
-    // Validation: A user must be in a team to create an issue.
-    // We will add the logic to create teams later. For now, we'll assume a user has a teamId.
     if (!user.teamId) {
       return res.status(400).json({ msg: 'User is not part of a team and cannot create issues.' });
     }
-
-    // Create the new issue document
     const issue = new Issue({
       title,
       description,
       priority,
       category,
-      raisedBy: req.user.id, // The logged-in user who is creating the issue
+      raisedBy: req.user.id,
       organizationId: user.organizationId,
-      teamId: user.teamId, // The team of the user creating the issue
+      teamId: user.teamId,
     });
-
-    // Save the issue to the database
     const createdIssue = await issue.save();
     res.status(201).json(createdIssue);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
 
+// @desc    Get issues relevant to the logged-in user
+// @route   GET /api/issues
+// @access  Private
+const getIssues = async (req, res) => {
+  try {
+    let issues;
+    const userRole = req.user.role;
+    if (userRole === 'Developer' || userRole === 'TeamLeader') {
+      issues = await Issue.find({ teamId: req.user.teamId });
+    } else if (userRole === 'Manager' || userRole === 'SuperManager') {
+      issues = await Issue.find({ organizationId: req.user.organizationId });
+    }
+    res.json(issues);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+// @desc    Get a single issue by ID
+// @route   GET /api/issues/:id
+// @access  Private
+const getIssueById = async (req, res) => {
+  try {
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) {
+      return res.status(404).json({ msg: 'Issue not found' });
+    }
+    res.json(issue);
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
@@ -41,4 +65,6 @@ const createIssue = async (req, res) => {
 
 module.exports = {
   createIssue,
+  getIssues,
+  getIssueById,
 };
