@@ -15,12 +15,10 @@ app.get('/', (req, res) => {
 });
 
 // --- Define Routes ---
-// For any URL that starts with /api/organizations
 app.use('/api/organizations', require('./routes/organizationRoutes'));
-
-// For any URL that starts with /api/users
 app.use('/api/users', require('./routes/userRoutes'));
-
+app.use('/api/issues', require('./routes/issueRoutes')); // <-- ADD THIS
+app.use('/api/teams', require('./routes/teamRoutes'));
 
 // Start the server
 app.listen(PORT, () => {

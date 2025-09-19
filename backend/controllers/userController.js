@@ -1,6 +1,7 @@
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 // Controller function for regular user registration (Manager, TL, Dev)
 const registerUser = async (req, res) => {
@@ -64,6 +65,42 @@ const registerUser = async (req, res) => {
   }
 };
 
+// Function to generate a JWT
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: '30d', // Token will expire in 30 days
+  });
+};
+
+// @desc    Authenticate a user & get token
+// @route   POST /api/users/login
+// @access  Public
+const loginUser = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    // Check for user by email
+    const user = await User.findOne({ email });
+
+    // If user exists and password matches, send back user data and token
+    if (user && (await bcrypt.compare(password, user.password))) {
+      res.json({
+        _id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        token: generateToken(user._id),
+      });
+    } else {
+      res.status(401).json({ msg: 'Invalid email or password' });
+    }
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
 module.exports = {
   registerUser,
+  loginUser, 
 };

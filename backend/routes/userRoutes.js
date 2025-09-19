@@ -1,13 +1,10 @@
 const express = require('express');
 const router = express.Router();
 
-// Import the new user registration controller function
-const { registerUser } = require('../controllers/userController');
+// Import both controller functions
+const { registerUser, loginUser } = require('../controllers/userController');
 
-// This route says: "When a POST request comes to '/register',
-// execute the registerUser function."
 router.post('/register', registerUser);
+router.post('/login', loginUser); // <-- ADD THIS LINE
 
-
-// Export the router
 module.exports = router;
