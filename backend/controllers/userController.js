@@ -5,50 +5,53 @@ const jwt = require('jsonwebtoken');
 
 // Controller function for regular user registration (Manager, TL, Dev)
 const registerUser = async (req, res) => {
-  // Get the data from the request body
   const { name, email, password, role, organizationCode, managerId, teamLeaderId } = req.body;
 
   try {
-    // --- Validation Step ---
-
-    // 1. Check if an organization with the given code exists.
+    // 1. Verify organization exists via code
     const organization = await Organization.findOne({ organizationCode });
     if (!organization) {
       return res.status(404).json({ msg: 'Invalid Organization Code. Organization not found.' });
     }
 
-    // 2. Check if a user with the provided email already exists.
+    // 2. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ msg: 'A user with this email already exists.' });
     }
 
-    // Note: More advanced validation would check if the managerId/teamLeaderId are valid users
-    // within the same organization. We will add this later to keep this step clear.
+    // 3. Cross-Tenant Security Validations
+    if (role === 'TeamLeader' && managerId) {
+      const assignedManager = await User.findById(managerId);
+      if (!assignedManager || assignedManager.organizationId.toString() !== organization._id.toString()) {
+        return res.status(400).json({ msg: 'Selected Manager does not belong to your organization.' });
+      }
+    }
 
-    // --- Creation Step ---
+    if (role === 'Developer' && teamLeaderId) {
+      const assignedTL = await User.findById(teamLeaderId);
+      if (!assignedTL || assignedTL.organizationId.toString() !== organization._id.toString()) {
+        return res.status(400).json({ msg: 'Selected Team Leader does not belong to your organization.' });
+      }
+    }
 
-    // 1. Create the new user object
+    // 4. Create and Hash User
     const newUser = new User({
       name,
       email,
-      password, // This will be hashed next
+      password,
       role,
-      organizationId: organization._id, // Link to the found organization
+      organizationId: organization._id,
       managerId: role === 'TeamLeader' ? managerId : null,
       teamLeaderId: role === 'Developer' ? teamLeaderId : null,
-      isApproved: false // User is not approved until OTP verification
+      isApproved: false // Stays false until verified via OTP
     });
 
-    // 2. Securely hash the password
     const salt = await bcrypt.genSalt(10);
     newUser.password = await bcrypt.hash(password, salt);
 
-    // 3. Save the new user to the database
     await newUser.save();
 
-    // --- Response Step ---
-    // For now, we send a success message. Later, this is where we will trigger the OTP.
     res.status(201).json({
       msg: 'Registration successful. Your account is pending approval.',
       user: {
@@ -65,25 +68,26 @@ const registerUser = async (req, res) => {
   }
 };
 
-// Function to generate a JWT
+// Helper to generate JWT
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '30d', // Token will expire in 30 days
+    expiresIn: '30d',
   });
 };
 
-// @desc    Authenticate a user & get token
-// @route   POST /api/users/login
-// @access  Public
+// Authenticate user & get token
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    // Check for user by email
     const user = await User.findOne({ email });
 
-    // If user exists and password matches, send back user data and token
     if (user && (await bcrypt.compare(password, user.password))) {
+      // Security Check: Block login if account has not passed the approval/OTP loop
+      if (!user.isApproved) {
+        return res.status(403).json({ msg: 'Account pending activation. Please verify your identity first.' });
+      }
+
       res.json({
         _id: user.id,
         name: user.name,

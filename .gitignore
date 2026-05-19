@@ -1,11 +1,14 @@
 # Dependencies
+node_modules/
 /node_modules
 
 # Environment variables
 .env
 
-# Production build
+# Production builds (Supports both CRA and Vite architectures)
 /build
+/dist
+dist/
 
 # Logs
 npm-debug.log*

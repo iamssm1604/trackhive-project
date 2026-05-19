@@ -4,41 +4,44 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-// This function just checks if the user is logged in
+// Protect middleware to verify JWT and attach user to request object
 const protect = async (req, res, next) => {
   let token;
+
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
       req.user = await User.findById(decoded.id).select('-password');
-      next();
+      return next(); // Explicit return to stop execution after passing to next middleware
     } catch (error) {
-      res.status(401).json({ msg: 'Not authorized, token failed' });
+      console.error(error.message);
+      return res.status(401).json({ msg: 'Not authorized, token failed' });
     }
   }
+
   if (!token) {
-    res.status(401).json({ msg: 'Not authorized, no token' });
+    return res.status(401).json({ msg: 'Not authorized, no token' });
   }
 };
 
-// This new function checks if the logged-in user is a Manager
+// Guard allowing access to Managers AND SuperManagers
 const manager = (req, res, next) => {
-  if (req.user && req.user.role === 'Manager') {
-    next(); // If they are a manager, proceed
+  if (req.user && (req.user.role === 'Manager' || req.user.role === 'SuperManager')) {
+    next();
   } else {
-    res.status(403).json({ msg: 'Not authorized as a Manager' });
+    res.status(403).json({ msg: 'Not authorized: Requires Manager or Super Manager privileges.' });
   }
 };
 
-// ... (at the bottom of the file)
+// Guard allowing access to Team Leaders
 const teamLeader = (req, res, next) => {
   if (req.user && req.user.role === 'TeamLeader') {
     next();
   } else {
-    res.status(403).json({ msg: 'Not authorized as a Team Leader' });
+    res.status(403).json({ msg: 'Not authorized: Requires Team Leader privileges.' });
   }
 };
 
-module.exports = { protect, manager, teamLeader }; // <-- Update this line
-
+module.exports = { protect, manager, teamLeader };
