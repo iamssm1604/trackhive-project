@@ -2,25 +2,50 @@ const Organization = require('../models/Organization');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
-// Controller function for regular user registration (Manager, TL, Dev)
+// Controller function for handling both Organization Creation and Joining
 const registerUser = async (req, res) => {
-  const { name, email, password, role, organizationCode, managerId, teamLeaderId } = req.body;
+  const { name, email, password, role, organizationName, organizationCode, domain, isCreatingOrg, managerId, teamLeaderId } = req.body;
 
   try {
-    // 1. Verify organization exists via code
-    const organization = await Organization.findOne({ organizationCode });
-    if (!organization) {
-      return res.status(404).json({ msg: 'Invalid Organization Code. Organization not found.' });
+    let organization;
+
+    if (isCreatingOrg) {
+      // 1. SCENARIO A: Creating a brand new Organization
+      const existingOrg = await Organization.findOne({ name: organizationName });
+      if (existingOrg) {
+        return res.status(400).json({ msg: 'An organization with this name already exists.' });
+      }
+
+      // Generate a unique 6-character organization code
+      const generatedCode = crypto.randomBytes(3).toString('hex').toUpperCase();
+
+      organization = new Organization({
+        name: organizationName,
+        organizationCode: generatedCode,
+        domain: domain || `${organizationName.toLowerCase().replace(/\s+/g, '')}.com`
+      });
+      await organization.save();
+
+    } else {
+      // 2. SCENARIO B: Joining an existing Organization via code or name
+      organization = await Organization.findOne({ 
+        $or: [{ organizationCode }, { name: organizationName }] 
+      });
+
+      if (!organization) {
+        return res.status(404).json({ msg: 'Organization not found. Please check the organization code.' });
+      }
     }
 
-    // 2. Check if user already exists
+    // 3. Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ msg: 'A user with this email already exists.' });
     }
 
-    // 3. Cross-Tenant Security Validations
+    // 4. Cross-Tenant Security Validations
     if (role === 'TeamLeader' && managerId) {
       const assignedManager = await User.findById(managerId);
       if (!assignedManager || assignedManager.organizationId.toString() !== organization._id.toString()) {
@@ -35,16 +60,19 @@ const registerUser = async (req, res) => {
       }
     }
 
-    // 4. Create and Hash User
+    // 5. Create and Hash User
+    const finalRole = isCreatingOrg ? 'SuperManager' : role;
+    const isApprovedStatus = isCreatingOrg ? true : false;
+
     const newUser = new User({
       name,
       email,
       password,
-      role,
+      role: finalRole,
       organizationId: organization._id,
       managerId: role === 'TeamLeader' ? managerId : null,
       teamLeaderId: role === 'Developer' ? teamLeaderId : null,
-      isApproved: false // Stays false until verified via OTP
+      isApproved: isApprovedStatus 
     });
 
     const salt = await bcrypt.genSalt(10);
@@ -53,7 +81,10 @@ const registerUser = async (req, res) => {
     await newUser.save();
 
     res.status(201).json({
-      msg: 'Registration successful. Your account is pending approval.',
+      msg: isCreatingOrg 
+        ? `Organization created successfully! Your Org Code is ${organization.organizationCode}. You can now log in.` 
+        : 'Registration successful. Your account is pending approval.',
+      organizationCode: organization.organizationCode,
       user: {
         id: newUser._id,
         name: newUser.name,
@@ -63,7 +94,7 @@ const registerUser = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err.message);
+    console.error("Registration error:", err.message);
     res.status(500).send('Server Error');
   }
 };
@@ -83,9 +114,9 @@ const loginUser = async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await bcrypt.compare(password, user.password))) {
-      // Security Check: Block login if account has not passed the approval/OTP loop
+      // Security Check: Block login if account has not passed approval loop
       if (!user.isApproved) {
-        return res.status(403).json({ msg: 'Account pending activation. Please verify your identity first.' });
+        return res.status(403).json({ msg: 'Account pending activation. Please wait for your SuperManager to approve you.' });
       }
 
       res.json({
@@ -99,6 +130,100 @@ const loginUser = async (req, res) => {
       res.status(401).json({ msg: 'Invalid email or password' });
     }
   } catch (err) {
+    console.error("Login error:", err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+// Get all pending users for SuperManager
+const getPendingUsers = async (req, res) => {
+  try {
+    const superManager = await User.findById(req.user.id);
+    if (!superManager || (superManager.role !== 'SuperManager' && superManager.role !== 'Manager')) {
+      return res.status(403).json({ msg: 'Access denied. Authorized managers only.' });
+    }
+
+    const pendingUsers = await User.find({ 
+      organizationId: superManager.organizationId, 
+      isApproved: false 
+    }).select('-password');
+
+    res.json(pendingUsers);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+// Approve a user
+const approveUser = async (req, res) => {
+  try {
+    const superManager = await User.findById(req.user.id);
+    if (!superManager || (superManager.role !== 'SuperManager' && superManager.role !== 'Manager')) {
+      return res.status(403).json({ msg: 'Access denied.' });
+    }
+
+    const userToApprove = await User.findById(req.params.id);
+    if (!userToApprove) {
+      return res.status(404).json({ msg: 'User not found.' });
+    }
+
+    if (userToApprove.organizationId.toString() !== superManager.organizationId.toString()) {
+      return res.status(400).json({ msg: 'User does not belong to your organization.' });
+    }
+
+    userToApprove.isApproved = true;
+    await userToApprove.save();
+
+    res.json({ msg: `${userToApprove.name} has been approved successfully.` });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+// Get all approved Team Leaders for an organization (used in registration dropdown)
+const getTeamLeadersByOrg = async (req, res) => {
+  try {
+    const { orgCode, orgName } = req.query;
+    
+    const organization = await Organization.findOne({ 
+      $or: [{ organizationCode: orgCode }, { name: orgName }] 
+    });
+
+    if (!organization) {
+      return res.status(404).json({ msg: 'Organization not found.' });
+    }
+
+    const teamLeaders = await User.find({
+      organizationId: organization._id,
+      role: 'TeamLeader',
+      isApproved: true
+    }).select('name _id email');
+
+    res.json(teamLeaders);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+// Get all approved team leaders for the organization
+const getApprovedTeamLeaders = async (req, res) => {
+  try {
+    const manager = await User.findById(req.user.id);
+    if (!manager) {
+      return res.status(404).json({ msg: 'Manager not found.' });
+    }
+
+    const teamLeaders = await User.find({
+      organizationId: manager.organizationId,
+      role: 'TeamLeader',
+      isApproved: true
+    }).select('name email _id');
+
+    res.json(teamLeaders);
+  } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
   }
@@ -106,5 +231,9 @@ const loginUser = async (req, res) => {
 
 module.exports = {
   registerUser,
-  loginUser, 
+  loginUser,
+  getPendingUsers,
+  approveUser,
+  getTeamLeadersByOrg,
+  getApprovedTeamLeaders
 };

@@ -1,16 +1,32 @@
 const Issue = require('../models/Issue');
 const User = require('../models/User');
+const Team = require('../models/Team');
 
-// @desc    Create a new issue
-// @route   POST /api/issues
-// @access  Private
+const ensureUserTeam = async (user) => {
+  if (!user.teamId) {
+    let team = await Team.findOne({ 
+      $or: [{ members: user._id }, { teamLeaderId: user._id }] 
+    });
+    
+    if (team) {
+      user.teamId = team._id;
+      user.teamLeaderId = team.teamLeaderId;
+      await user.save();
+    }
+  }
+  return user;
+};
+
 const createIssue = async (req, res) => {
   const { title, description, priority, category } = req.body;
   try {
-    const user = await User.findById(req.user.id);
+    let user = await User.findById(req.user.id);
+    user = await ensureUserTeam(user);
+    
     if (!user.teamId) {
       return res.status(400).json({ msg: 'User is not part of a team and cannot create issues.' });
     }
+    
     const issue = new Issue({
       title,
       description,
@@ -19,7 +35,9 @@ const createIssue = async (req, res) => {
       raisedBy: req.user.id,
       organizationId: user.organizationId,
       teamId: user.teamId,
+      comments: []
     });
+    
     const createdIssue = await issue.save();
     res.status(201).json(createdIssue);
   } catch (err) {
@@ -28,18 +46,27 @@ const createIssue = async (req, res) => {
   }
 };
 
-// @desc    Get issues relevant to the logged-in user
-// @route   GET /api/issues
-// @access  Private
 const getIssues = async (req, res) => {
   try {
+    let user = await User.findById(req.user.id);
+    user = await ensureUserTeam(user);
+
     let issues;
-    const userRole = req.user.role;
+    const userRole = user.role;
+    
     if (userRole === 'Developer' || userRole === 'TeamLeader') {
-      issues = await Issue.find({ teamId: req.user.teamId });
+      if (!user.teamId) {
+        return res.status(400).json({ msg: 'User is not assigned to a team.' });
+      }
+      issues = await Issue.find({ teamId: user.teamId })
+        .populate('raisedBy', 'name email role')
+        .populate('comments.user', 'name email role');
     } else if (userRole === 'Manager' || userRole === 'SuperManager') {
-      issues = await Issue.find({ organizationId: req.user.organizationId });
+      issues = await Issue.find({ organizationId: user.organizationId })
+        .populate('raisedBy', 'name email role')
+        .populate('comments.user', 'name email role');
     }
+    
     res.json(issues);
   } catch (err) {
     console.error(err.message);
@@ -47,12 +74,11 @@ const getIssues = async (req, res) => {
   }
 };
 
-// @desc    Get a single issue by ID
-// @route   GET /api/issues/:id
-// @access  Private
 const getIssueById = async (req, res) => {
   try {
-    const issue = await Issue.findById(req.params.id);
+    const issue = await Issue.findById(req.params.id)
+      .populate('raisedBy', 'name email role')
+      .populate('comments.user', 'name email role');
     if (!issue) {
       return res.status(404).json({ msg: 'Issue not found' });
     }
@@ -63,8 +89,70 @@ const getIssueById = async (req, res) => {
   }
 };
 
+const updateIssueStatus = async (req, res) => {
+  const { status } = req.body;
+  try {
+    const issue = await Issue.findById(req.params.id);
+    
+    if (!issue) {
+      return res.status(404).json({ msg: 'Issue not found' });
+    }
+
+    const validStatuses = ['Open', 'InProgress', 'Closed'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ msg: 'Invalid status value' });
+    }
+
+    issue.status = status;
+    await issue.save();
+    
+    res.json(issue);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+const addCommentToIssue = async (req, res) => {
+  const { text } = req.body;
+  try {
+    const issue = await Issue.findById(req.params.id);
+    
+    if (!issue) {
+      return res.status(404).json({ msg: 'Issue not found' });
+    }
+
+    if (!text || text.trim() === '') {
+      return res.status(400).json({ msg: 'Comment text is required' });
+    }
+
+    if (!issue.comments) {
+      issue.comments = [];
+    }
+
+    const newComment = {
+      user: req.user.id,
+      text,
+    };
+
+    issue.comments.push(newComment);
+    await issue.save();
+
+    const updatedIssue = await Issue.findById(req.params.id)
+      .populate('raisedBy', 'name email role')
+      .populate('comments.user', 'name email role');
+
+    res.json(updatedIssue.comments);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
 module.exports = {
   createIssue,
   getIssues,
   getIssueById,
+  updateIssueStatus,
+  addCommentToIssue
 };

@@ -1,12 +1,21 @@
 const express = require('express');
 const router = express.Router();
-const { createTeam, addTeamMember } = require('../controllers/teamController');
-const { protect, manager, teamLeader } = require('../middleware/authMiddleware');
+const { 
+  createTeam, 
+  addMemberToTeam, 
+  getTeams, 
+  getAvailableDevelopers 
+} = require('../controllers/teamController');
 
-// Route for creating a new team (Accessible by Managers & SuperManagers via fixed authMiddleware)
-router.post('/', protect, manager, createTeam);
+const { protect, manager } = require('../middleware/authMiddleware');
 
-// Route for adding a member to a team (Protected by Team Leader role check)
-router.put('/:id/members', protect, teamLeader, addTeamMember); // <-- FIXED: Inserted teamLeader guard
+router.get('/', protect, getTeams);
+router.get('/available-developers', protect, getAvailableDevelopers);
+
+// Allowed for SuperManager and Manager
+router.post('/create', protect, manager, createTeam);
+
+// Allowed for Managers and Team Leaders
+router.put('/add-member', protect, addMemberToTeam);
 
 module.exports = router;

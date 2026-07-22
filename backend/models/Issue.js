@@ -1,24 +1,30 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
+// 1. Define Comment Schema
+const CommentSchema = new Schema({
+  user: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+  },
+  text: {
+    type: String,
+    required: [true, 'Comment text cannot be empty.'],
+  },
+}, { timestamps: true });
+
+// 2. Define Issue Schema
 const IssueSchema = new Schema({
-  // The organization this issue belongs to, for high-level filtering.
   organizationId: {
     type: Schema.Types.ObjectId,
     ref: 'Organization',
     required: true,
   },
-  // The specific team this issue belongs to.
   teamId: {
     type: Schema.Types.ObjectId,
-    ref: 'Team', // We will create the Team model later.
+    ref: 'Team',
     required: true,
-  },
-  // A user-friendly ID like "INNOVATE-101". We'll add logic for this later.
-  issueId: {
-    type: String,
-    // required: true,
-    // unique: true,
   },
   title: {
     type: String,
@@ -43,17 +49,12 @@ const IssueSchema = new Schema({
     enum: ['Bug', 'Task', 'Feature'],
     default: 'Task',
   },
-  // The user who created the issue.
   raisedBy: {
     type: Schema.Types.ObjectId,
     ref: 'User',
     required: true,
   },
-  // An array of users assigned to the issue. Can be empty initially.
-  assignedTo: [{
-    type: Schema.Types.ObjectId,
-    ref: 'User',
-  }],
+  comments: [CommentSchema], // <-- Ensure this line is present
 }, { timestamps: true });
 
 module.exports = mongoose.model('Issue', IssueSchema);
